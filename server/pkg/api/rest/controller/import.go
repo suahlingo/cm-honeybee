@@ -2,15 +2,16 @@ package controller
 
 import (
 	"errors"
+	"net/http"
+	"strconv"
+	"time"
+
 	"github.com/cloud-barista/cm-honeybee/server/dao"
 	"github.com/cloud-barista/cm-honeybee/server/lib/ssh"
 	"github.com/cloud-barista/cm-honeybee/server/pkg/api/rest/common"
 	"github.com/cloud-barista/cm-honeybee/server/pkg/api/rest/model"
 	"github.com/jollaman999/utils/logger"
 	"github.com/labstack/echo/v4"
-	"net/http"
-	"strconv"
-	"time"
 )
 
 func doImportInfra(connID string) (*model.SavedInfraInfo, error) {
@@ -526,4 +527,132 @@ func ImportHelmSourceGroup(c echo.Context) error {
 	}
 
 	return c.JSONPretty(http.StatusOK, savedHelmInfoList, " ")
+}
+
+func doImportLegacy(connID string) (*model.SavedLegacyInfo, error) {
+	connectionInfo, err := dao.ConnectionInfoGet(connID)
+	if err != nil {
+		return nil, err
+	}
+
+	oldSavedLegacyInfo, _ := dao.SavedLegacyInfoGet(connectionInfo.ID)
+
+	// Register new legacy info if not exist
+	if oldSavedLegacyInfo == nil {
+		savedLegacyInfo := new(model.SavedLegacyInfo)
+		savedLegacyInfo.ConnectionID = connectionInfo.ID
+		savedLegacyInfo.LegacyData = ""
+		savedLegacyInfo.Status = "importing"
+		savedLegacyInfo.SavedTime = time.Now()
+		savedLegacyInfo, err = dao.SavedLegacyInfoRegister(savedLegacyInfo)
+		if err != nil {
+			errMsg := "Error occurred while initializing legacy software record." +
+				" (ConnectionID = " + connectionInfo.ID + ")"
+			logger.Println(logger.ERROR, false, errMsg)
+			return nil, errors.New(errMsg)
+		}
+		oldSavedLegacyInfo = savedLegacyInfo
+	}
+
+	// Request data from Honeybee agent
+	s := &ssh.SSH{}
+	data, err := s.SendGetRequestToAgent(*connectionInfo, "/software/legacy")
+	if err != nil {
+		oldSavedLegacyInfo.Status = "failed"
+		_ = dao.SavedLegacyInfoUpdate(oldSavedLegacyInfo)
+		errMsg := "Error occurred while fetching legacy software information." +
+			" (ConnectionID = " + connectionInfo.ID + ", Error = " + err.Error() + ")"
+		logger.Println(logger.ERROR, false, errMsg)
+		return nil, errors.New(errMsg)
+	}
+
+	// Save result
+	oldSavedLegacyInfo.LegacyData = data
+	oldSavedLegacyInfo.Status = "success"
+	oldSavedLegacyInfo.SavedTime = time.Now()
+	err = dao.SavedLegacyInfoUpdate(oldSavedLegacyInfo)
+	if err != nil {
+		errMsg := "Error occurred while saving legacy software information." +
+			" (ConnectionID = " + connectionInfo.ID + ", Error = " + err.Error() + ")"
+		logger.Println(logger.ERROR, false, errMsg)
+		return nil, errors.New(errMsg)
+	}
+
+	return oldSavedLegacyInfo, nil
+}
+
+// ImportLegacy godoc
+//
+//	@ID				import-legacy
+//	@Summary		Import Legacy Software
+//	@Description	Collect and store legacy software information from a VM (via /proc scanning).
+//	@Tags			[Import] Import source info
+//	@Accept			json
+//	@Produce		json
+//	@Param			sgId path string true "ID of the source group"
+//	@Param			connId path string true "ID of the connection info"
+//	@Success		200	{object}	model.SavedLegacyInfo	"Successfully saved the legacy software information"
+//	@Failure		400	{object}	common.ErrorResponse	"Bad request"
+//	@Failure		500	{object}	common.ErrorResponse	"Failed to save the legacy software information"
+//	@Router			/source_group/{sgId}/connection_info/{connId}/import/legacy [post]
+func ImportLegacy(c echo.Context) error {
+	sgID := c.Param("sgId")
+	if sgID == "" {
+		return common.ReturnErrorMsg(c, "Please provide the sgId.")
+	}
+
+	connID := c.Param("connId")
+	if connID == "" {
+		return common.ReturnErrorMsg(c, "Please provide the connId.")
+	}
+
+	_, err := dao.SourceGroupGet(sgID)
+	if err != nil {
+		return common.ReturnErrorMsg(c, err.Error())
+	}
+
+	savedLegacyInfo, err := doImportLegacy(connID)
+	if err != nil {
+		return common.ReturnErrorMsg(c, err.Error())
+	}
+
+	return c.JSONPretty(http.StatusOK, savedLegacyInfo, " ")
+}
+
+// ImportLegacySourceGroup godoc
+//
+//	@ID				import-legacy-source-group
+//	@Summary		Import Legacy Software for Source Group
+//	@Description	Import legacy software information for all connections in a source group.
+//	@Tags			[Import] Import source info
+//	@Accept			json
+//	@Produce		json
+//	@Param			sgId path string true "ID of the source group"
+//	@Success		200	{object}	[]model.SavedLegacyInfo	"Successfully saved the legacy software information"
+//	@Failure		400	{object}	common.ErrorResponse	"Bad request"
+//	@Failure		500	{object}	common.ErrorResponse	"Failed to save the legacy software information"
+//	@Router			/source_group/{sgId}/import/legacy [post]
+func ImportLegacySourceGroup(c echo.Context) error {
+	sgID := c.Param("sgId")
+	if sgID == "" {
+		return common.ReturnErrorMsg(c, "Please provide the sgId.")
+	}
+
+	_, err := dao.SourceGroupGet(sgID)
+	if err != nil {
+		return common.ReturnErrorMsg(c, err.Error())
+	}
+
+	list, err := dao.ConnectionInfoGetList(&model.ConnectionInfo{SourceGroupID: sgID}, 0, 0)
+	if err != nil {
+		return common.ReturnErrorMsg(c, err.Error())
+	}
+
+	var savedLegacyInfoList []model.SavedLegacyInfo
+	for _, conn := range *list {
+		savedLegacyInfo, _ := doImportLegacy(conn.ID)
+		savedLegacyInfoList = append(savedLegacyInfoList, *savedLegacyInfo)
+	}
+
+	return c.JSONPretty(http.StatusOK, savedLegacyInfoList, " ")
 }

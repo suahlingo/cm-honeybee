@@ -63,6 +63,7 @@ func Init() {
 	route.RegisterSoftware(e)
 	route.RegisterKubernetes(e)
 	route.RegisterHelm(e)
+	route.RegisterLegacy(e)
 	route.RegisterSwagger(e)
 	route.RegisterUtility(e)
 

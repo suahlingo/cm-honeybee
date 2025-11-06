@@ -53,6 +53,11 @@ func Open() error {
 		logger.Panicln(logger.ERROR, true, err)
 	}
 
+	err = DB.AutoMigrate(&model.SavedLegacyInfo{})
+	if err != nil {
+		logger.Panicln(logger.ERROR, true, err)
+	}
+
 	return err
 }
 

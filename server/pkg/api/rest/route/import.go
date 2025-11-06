@@ -1,10 +1,11 @@
 package route
 
 import (
+	"strings"
+
 	"github.com/cloud-barista/cm-honeybee/server/common"
 	"github.com/cloud-barista/cm-honeybee/server/pkg/api/rest/controller"
 	"github.com/labstack/echo/v4"
-	"strings"
 )
 
 func RegisterImport(e *echo.Echo) {
@@ -16,4 +17,7 @@ func RegisterImport(e *echo.Echo) {
 	e.POST("/"+strings.ToLower(common.ShortModuleName)+"/source_group/:sgId/import/kubernetes", controller.ImportKubernetesSourceGroup)
 	e.POST("/"+strings.ToLower(common.ShortModuleName)+"/source_group/:sgId/connection_info/:connId/import/helm", controller.ImportHelm)
 	e.POST("/"+strings.ToLower(common.ShortModuleName)+"/source_group/:sgId/import/helm", controller.ImportHelmSourceGroup)
+
+	e.POST("/"+strings.ToLower(common.ShortModuleName)+"/source_group/:sgId/connection_info/:connId/import/legacy", controller.ImportLegacy)
+	e.POST("/"+strings.ToLower(common.ShortModuleName)+"/source_group/:sgId/import/legacy", controller.ImportLegacySourceGroup)
 }
